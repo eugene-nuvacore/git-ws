@@ -129,7 +129,9 @@ def atomic_update_or_create_path(path: Path):
             # If the path already exists, make a copy to work on:
             if path.exists():
                 if path.is_dir():
-                    copytree(path, tmp_path)
+                    # symlinks=True: preserve symlinks rather than dereference them, so a
+                    # dangling symlink in the source does not abort the copy with ENOENT.
+                    copytree(path, tmp_path, symlinks=True)
                 else:
                     copyfile(path, tmp_path)
 

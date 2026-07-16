@@ -286,6 +286,46 @@ def test_cache_modified(tmp_path, repos):
     assert not (git.path / "new.txt").exists()
 
 
+def test_cache_dangling_symlink(tmp_path):
+    """A cached repo with a dangling symlink must clone without dereferencing it."""
+    repos_path = tmp_path / "repos"
+
+    with git_repo(repos_path / "main", commit="initial") as path:
+        (path / "data.txt").write_text("main")
+        (path / "dangling").symlink_to("does/not/exist")
+
+    cache_path = tmp_path / "cache"
+
+    # First clone initializes the cache: copytree cache -> destination.
+    git = Git(tmp_path / "main1", clone_cache=cache_path)
+    git.clone(path2url(repos_path / "main"))
+    assert (git.path / "dangling").is_symlink()
+
+    # Second clone reuses the cache: copytree cache -> tmp (pathlock), then -> destination.
+    git = Git(tmp_path / "main2", clone_cache=cache_path)
+    git.clone(path2url(repos_path / "main"))
+    assert (git.path / "dangling").is_symlink()
+
+
+def test_cache_existing_empty_dir(tmp_path):
+    """Cloning via the cache into an existing empty dir (submodule mountpoint) must work."""
+    repos_path = tmp_path / "repos"
+
+    with git_repo(repos_path / "main", commit="initial") as path:
+        (path / "data.txt").write_text("main")
+
+    cache_path = tmp_path / "cache"
+
+    # git leaves an empty directory for an uninitialised submodule mountpoint; the
+    # cache -> destination copy must merge into it instead of failing on its existence.
+    for name in ("main1", "main2"):  # cache-init, then cache-reuse
+        dest = tmp_path / name
+        dest.mkdir(parents=True)
+        git = Git(dest, clone_cache=cache_path)
+        git.clone(path2url(repos_path / "main"))
+        assert (git.path / "data.txt").read_text() == "main"
+
+
 def test_empty(tmp_path):
     """Test is_empty()."""
     Git.init(tmp_path)

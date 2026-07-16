@@ -356,7 +356,12 @@ class Git:
                 tmp_cache.mkdir(parents=True)
                 run(("git", "clone", "--", str(url), str(tmp_cache)))
             _LOGGER.debug("Copy %s to  %s)", tmp_cache, self.path)
-            shutil.copytree(tmp_cache, self.path)
+            # symlinks=True: a repo may contain a dangling symlink (e.g. edk2's
+            # EmulatorPkg X11IncludeHack); following it would abort the copy with ENOENT.
+            # dirs_exist_ok=True: self.path may be an empty submodule mountpoint left by a
+            # parent clone (the assert in clone() guarantees it is empty); plain git clone
+            # tolerates that, but copytree otherwise rejects it with FileExistsError.
+            shutil.copytree(tmp_cache, self.path, symlinks=True, dirs_exist_ok=True)
             # Remove user/password credentials from cache
             self._run(("remote", "remove", "origin"), cwd=tmp_cache)
 
