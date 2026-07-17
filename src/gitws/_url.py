@@ -16,9 +16,19 @@
 
 """Set of URL Helper Functions."""
 
+import re
 from os.path import relpath
 from typing import Optional
 from urllib import parse
+
+# SCP-like SSH syntax ``[user@]host:path``: a colon before any slash and no
+# ``scheme://``. urllib cannot parse these as URLs, so relative paths in them need
+# explicit resolution. This mirrors git's own rule for recognizing them.
+_RE_SCP = re.compile(r"^[^/]+:")
+
+
+def _is_scp(url: str) -> bool:
+    return "://" not in url and bool(_RE_SCP.match(url))
 
 
 def urljoin(base: Optional[str], url: str) -> str:
@@ -41,6 +51,15 @@ def urljoin(base: Optional[str], url: str) -> str:
     >>> urljoin('ssh://domain.com/base/repo1.git', '../repo2.git')
     'ssh://domain.com/base/repo2.git'
 
+    >>> urljoin('git@domain.com:base/repo1.git', '../repo2.git')
+    'git@domain.com:base/repo2.git'
+    >>> urljoin('git@domain.com:base/repo1.git/', 'repo2.git')
+    'git@domain.com:base/repo1.git/repo2.git'
+    >>> urljoin('git@domain.com:base/repo1.git', 'git@domain.com:base/repo2.git')
+    'git@domain.com:base/repo2.git'
+    >>> urljoin('domain.com:base/repo1.git', '../repo2.git')
+    'domain.com:base/repo2.git'
+
     >>> urljoin('..', 'repo1.git')
     '../repo1.git'
     >>> urljoin('../../', 'repo1.git')
@@ -56,13 +75,23 @@ def urljoin(base: Optional[str], url: str) -> str:
     if not base:
         return url
 
-    urlparsed = parse.urlparse(url)
-    if urlparsed.scheme:
-        # absolute url
+    if is_urlabs(url) or _is_scp(url):
+        # absolute url (``scheme://…`` or SCP-like ``host:path``)
         return url
 
     if not base.endswith("/"):
         base = f"{base}/"
+
+    if _is_scp(base):
+        # SCP-like SSH: normalize the path, keep the ``location:`` prefix so the
+        # result stays SCP syntax (git accepts it, but urllib cannot parse it).
+        location, _, path = base.partition(":")
+        joined = parse.urljoin(f"http://scp/{path.lstrip('/')}", url)
+        newpath = parse.urlparse(joined).path
+        if not path.startswith("/"):
+            newpath = newpath.lstrip("/")
+        return f"{location}:{newpath}"
+
     baseparsed = parse.urlparse(base)
     if not baseparsed.scheme:
         # relative base
